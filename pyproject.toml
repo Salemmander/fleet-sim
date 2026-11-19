@@ -19,3 +19,7 @@ dev = ["pyright>=1.1.414", "pytest>=9.2.0"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
+# JSON input is untyped by nature; we check it with isinstance at runtime
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownMemberType = false

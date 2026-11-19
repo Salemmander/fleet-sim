@@ -1,10 +1,53 @@
-from typing import Any, assert_never, cast
+from typing import Any, assert_never
 
-from .models import Idle, Intent, SetDest, Transit, World
+from .models import Idle, Intent, SetDest, Transit, VesselState, World
 
 
 class CommandError(Exception):
     pass
+
+
+def parse_init(
+    params: dict[str, Any],
+) -> tuple[list[list[int]], dict[str, VesselState]]:
+    """Validate init parameters and return (travel_times, vessel states).
+
+    Checks:
+      - travel_times: non-empty N x N list of ints, 0 on the diagonal,
+        positive everywhere else (bools rejected)
+      - vessels: list of {"id": str, "location": int in 0..N-1}, ids unique
+
+    Every vessel starts Idle at its location, in input order.
+    Raises CommandError on the first violation; never touches engine state.
+    """
+    travel_times = params.get("travel_times")
+    if not isinstance(travel_times, list) or not travel_times:
+        raise CommandError("travel_times must be a non-empty NxN matrix")
+    n = len(travel_times)
+
+    for i, row in enumerate(travel_times):
+        if not isinstance(row, list) or len(row) != n:
+            raise CommandError("travel_times must be a non-empty NxN matrix")
+        for j, t in enumerate(row):
+            # type() not isinstance(): bool is a subclass of int
+            if type(t) is not int or (t != 0 if i == j else t <= 0):
+                raise CommandError(f"invalid travel time at [{i}][{j}]")
+
+    vessels = params.get("vessels")
+    if not isinstance(vessels, list):
+        raise CommandError("vessels must be a list")
+    states: dict[str, VesselState] = {}
+    for vessel in vessels:
+        if not isinstance(vessel, dict):
+            raise CommandError(f"invalid vessel: {vessel}")
+        vid, loc = vessel.get("id"), vessel.get("location")
+        if not isinstance(vid, str) or type(loc) is not int or not 0 <= loc < n:
+            raise CommandError(f"invalid vessel: {vessel}")
+        if vid in states:
+            raise CommandError(f"duplicate vessel id {vid}")
+        states[vid] = Idle(loc)
+
+    return travel_times, states
 
 
 class Engine:
@@ -22,11 +65,9 @@ class Engine:
 
     def _dispatch(self, cmd: dict[str, Any]) -> dict[str, Any]:
         name = cmd.get("command")
-        raw = cmd.get("parameters", {})
-
-        if not isinstance(raw, dict):
+        params = cmd.get("parameters", {})
+        if not isinstance(params, dict):
             raise CommandError("parameters must be an object")
-        params = cast(dict[str, Any], raw)
 
         if name == "init":
             if self.committed is not None:
@@ -47,7 +88,10 @@ class Engine:
                 raise CommandError(f"unknown command: {name}")
 
     def _init(self, params: dict[str, Any]) -> dict[str, Any]:
-        pass
+        travel_times, states = parse_init(params)
+        self.travel_times = travel_times
+        self.committed = World(tick=0, vessels=states)
+        return self.committed.to_dict()
 
     def _tick(self, params: dict[str, Any]) -> dict[str, Any]:
         pass
