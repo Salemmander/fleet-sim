@@ -1,6 +1,6 @@
-from typing import Any, cast
+from typing import Any, assert_never, cast
 
-from .models import Intent, World
+from .models import Idle, Intent, SetDest, Transit, World
 
 
 class CommandError(Exception):
@@ -11,6 +11,7 @@ class Engine:
     def __init__(self) -> None:
         self.committed: World | None = None
         self.pending: dict[str, Intent] = {}
+        self.travel_times: list[list[int]] = []
 
     def step(self, cmd: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -56,3 +57,24 @@ class Engine:
 
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
         pass
+
+    def _planned(self) -> World:
+        committed = self.committed
+        assert committed is not None
+
+        vessels = dict(committed.vessels)
+        for vid, intent in self.pending.items():
+            current = committed.vessels[vid]
+            match intent:
+                case SetDest(destination=dest):
+                    assert isinstance(current, Idle)
+                    vessels[vid] = Transit(
+                        frm=current.location,
+                        to=dest,
+                        arrival_tick=committed.tick
+                        + self.travel_times[current.location][dest],
+                    )
+                case _:
+                    assert_never(intent)
+
+        return World(tick=committed.tick, vessels=vessels)

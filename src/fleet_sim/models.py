@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any, assert_never
 
 
 @dataclass(frozen=True)
@@ -28,3 +29,20 @@ Intent = SetDest
 class World:
     tick: int
     vessels: dict[str, VesselState]
+
+    def to_dict(self) -> dict[str, Any]:
+        vessels: dict[str, dict[str, Any]] = {}
+        for vid, state in self.vessels.items():
+            match state:
+                case Idle(location=loc):
+                    vessels[vid] = {"state": "idle", "location": loc}
+                case Transit(frm=frm, to=to, arrival_tick=arrival):
+                    vessels[vid] = {
+                        "state": "transit",
+                        "from": frm,
+                        "to": to,
+                        "arrives_at_tick": arrival,
+                    }
+                case _:
+                    assert_never(state)
+        return {"tick": self.tick, "vessels": vessels}
