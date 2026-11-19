@@ -97,10 +97,28 @@ class Engine:
         pass
 
     def _set_destination(self, params: dict[str, Any]) -> dict[str, Any]:
-        pass
+        committed = self.committed
+        assert committed is not None
+
+        vid = params.get("vessel_id")
+        dest = params.get("destination")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+        if type(dest) is not int or not 0 <= dest < len(self.travel_times):
+            raise CommandError(f"destination {dest} is out of range")
+
+        current = committed.vessels[vid]
+        if not isinstance(current, Idle):
+            raise CommandError(f"vessel {vid} is not idle")
+
+        if dest == current.location:
+            self.pending.pop(vid, None)
+        else:
+            self.pending[vid] = SetDest(dest)
+        return self._planned().to_dict()
 
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
-        pass
+        return self._planned().to_dict()
 
     def _planned(self) -> World:
         committed = self.committed
