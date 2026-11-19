@@ -94,7 +94,22 @@ class Engine:
         return self.committed.to_dict()
 
     def _tick(self, params: dict[str, Any]) -> dict[str, Any]:
-        pass
+        planned = self._planned()
+        new_tick = planned.tick + 1
+
+        vessels: dict[str, VesselState] = {}
+        for vid, state in planned.vessels.items():
+            match state:
+                case Transit(to=to, arrival_tick=arrival) if arrival == new_tick:
+                    vessels[vid] = Idle(to)
+                case Idle() | Transit():
+                    vessels[vid] = state
+                case _:
+                    assert_never(state)
+
+        self.committed = World(tick=new_tick, vessels=vessels)
+        self.pending = {}
+        return self.committed.to_dict()
 
     def _set_destination(self, params: dict[str, Any]) -> dict[str, Any]:
         committed = self.committed
