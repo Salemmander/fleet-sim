@@ -9,6 +9,7 @@ from .models import (
     Intent,
     Load,
     SetDest,
+    Swap,
     Transit,
     Undock,
     Unload,
@@ -117,6 +118,20 @@ def parse_init(
     return travel_times, dock_throughput, states, dock_cargo
 
 
+def loads_of(ops: list[CargoOp], d: int) -> int:
+    """Count ops that take a unit for destination d off the dock (loads and swaps)."""
+    return sum(
+        1 for op in ops if op == Load(d) or (isinstance(op, Swap) and op.load == d)
+    )
+
+
+def unloads_of(ops: list[CargoOp], d: int) -> int:
+    """Count ops that take a unit for destination d off the vessel (unloads and swaps)."""
+    return sum(
+        1 for op in ops if op == Unload(d) or (isinstance(op, Swap) and op.unload == d)
+    )
+
+
 class Engine:
     def __init__(self) -> None:
         self.committed: World | None = None
@@ -160,6 +175,8 @@ class Engine:
                 return self._load(params)
             case "unload":
                 return self._unload(params)
+            case "swap":
+                return self._swap(params)
             case _:
                 raise CommandError(f"unknown command: {name}")
 
@@ -281,7 +298,7 @@ class Engine:
             ops.remove(Unload(d))
         else:
             at_dock = self._ops_at(current)
-            if committed.dock_cargo.get((loc, d), 0) - at_dock.count(Load(d)) < 1:
+            if committed.dock_cargo.get((loc, d), 0) - loads_of(at_dock, d) < 1:
                 raise CommandError(f"no cargo for destination {d} at location {loc}")
             total = len(at_dock) + 1
             if total > self.dock_throughput[loc]:
@@ -318,7 +335,7 @@ class Engine:
             ops.remove(Load(d))
         else:
             # only this vessel's own pending unloads can claim its cargo
-            if committed.vessel_cargo[vid].get(d, 0) - ops.count(Unload(d)) < 1:
+            if committed.vessel_cargo[vid].get(d, 0) - unloads_of(ops, d) < 1:
                 raise CommandError(f"vessel {vid} has no cargo for destination {d}")
             total = len(self._ops_at(current)) + 1
             if total > self.dock_throughput[loc]:
@@ -332,6 +349,49 @@ class Engine:
             self.pending[vid] = CargoOps(tuple(ops))
         else:
             del self.pending[vid]
+        return self._planned().to_dict()
+
+    def _swap(self, params: dict[str, Any]) -> dict[str, Any]:
+        committed = self.committed
+        assert committed is not None
+        vid = params.get("vessel_id")
+        ld, ud = params.get("load_destination"), params.get("unload_destination")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+        n = len(self.travel_times)
+        if type(ld) is not int or not 0 <= ld < n:
+            raise CommandError(f"load_destination {ld} is out of range")
+        if type(ud) is not int or not 0 <= ud < n:
+            raise CommandError(f"unload_destination {ud} is out of range")
+
+        current = committed.vessels[vid]
+
+        if not isinstance(current, Docked):
+            raise CommandError(f"vessel {vid} is not docked")
+
+        if ld == ud:
+            raise CommandError(
+                "swap load_destination and unload_destination must differ"
+            )
+
+        loc = current.location
+        pending = self.pending.get(vid)
+        ops = list(pending.ops) if isinstance(pending, CargoOps) else []
+        at_dock = self._ops_at(current)
+
+        if committed.dock_cargo.get((loc, ld), 0) - loads_of(at_dock, ld) < 1:
+            raise CommandError(f"no cargo for destination {ld} at location {loc}")
+        if committed.vessel_cargo[vid].get(ud, 0) - unloads_of(ops, ud) < 1:
+            raise CommandError(f"vessel {vid} has no cargo for destination {ud}")
+        total = len(at_dock) + 1
+        if total > self.dock_throughput[loc]:
+            raise CommandError(
+                f"transfer of {total} operations exceeds dock throughput"
+                f" of {self.dock_throughput[loc]} at location {loc}"
+            )
+
+        ops.append(Swap(ld, ud))
+        self.pending[vid] = CargoOps(tuple(ops))
         return self._planned().to_dict()
 
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -389,6 +449,20 @@ class Engine:
                                 if d != loc:
                                     dock_cargo[(loc, d)] = (
                                         dock_cargo.get((loc, d), 0) + 1
+                                    )
+                            case Swap(load=ld, unload=ud):
+                                # load half: dock -> vessel
+                                dock_cargo[(loc, ld)] -= 1
+                                if dock_cargo[(loc, ld)] == 0:
+                                    del dock_cargo[(loc, ld)]
+                                cargo[ld] = cargo.get(ld, 0) + 1
+                                # unload half: vessel -> dock, or delivered
+                                cargo[ud] -= 1
+                                if cargo[ud] == 0:
+                                    del cargo[ud]
+                                if ud != loc:
+                                    dock_cargo[(loc, ud)] = (
+                                        dock_cargo.get((loc, ud), 0) + 1
                                     )
                             case _:
                                 assert_never(op)

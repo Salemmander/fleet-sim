@@ -32,7 +32,13 @@ class Unload:
     destination: int
 
 
-CargoOp = Load | Unload
+@dataclass(frozen=True)
+class Swap:
+    load: int
+    unload: int
+
+
+CargoOp = Load | Unload | Swap
 
 
 @dataclass(frozen=True)
