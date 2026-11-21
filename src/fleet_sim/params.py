@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 
 class Params(BaseModel):
@@ -6,7 +6,7 @@ class Params(BaseModel):
 
 
 class VesselSpec(Params):
-    id: str
+    id: str = Field(min_length=1)
     location: int
 
 
