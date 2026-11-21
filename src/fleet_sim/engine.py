@@ -156,12 +156,19 @@ class Engine:
                 raise CommandError(f"unknown command: {name}")
 
     def _init(self, params: dict[str, Any]) -> dict[str, Any]:
-        travel_times, states = parse_init(params)
+        travel_times, dock_throughput, states, dock_cargo = parse_init(params)
         self.travel_times = travel_times
-        self.committed = World(tick=0, vessels=states)
+        self.dock_throughput = dock_throughput
+        self.committed = World(
+            tick=0,
+            vessels=states,
+            vessel_cargo={vid: {} for vid in states},
+            dock_cargo=dock_cargo,
+        )
         return self.committed.to_dict()
 
     def _tick(self, params: dict[str, Any]) -> dict[str, Any]:
+        manifest = parse_manifest(params.get("cargo_manifest"), len(self.travel_times))
         planned = self._planned()
         new_tick = planned.tick + 1
 
@@ -175,7 +182,15 @@ class Engine:
                 case _:
                     assert_never(state)
 
-        self.committed = World(tick=new_tick, vessels=vessels)
+        dock_cargo = dict(planned.dock_cargo)
+        for key, qty in manifest.items():
+            dock_cargo[key] = dock_cargo.get(key, 0) + qty
+        self.committed = World(
+            tick=new_tick,
+            vessels=vessels,
+            vessel_cargo=planned.vessel_cargo,
+            dock_cargo=dock_cargo,
+        )
         self.pending = {}
         return self.committed.to_dict()
 
@@ -264,4 +279,9 @@ class Engine:
                 case _:
                     assert_never(intent)
 
-        return World(tick=committed.tick, vessels=vessels)
+        return World(
+            tick=committed.tick,
+            vessels=vessels,
+            vessel_cargo=committed.vessel_cargo,
+            dock_cargo=committed.dock_cargo,
+        )
