@@ -132,6 +132,18 @@ def unloads_of(ops: list[CargoOp], d: int) -> int:
     )
 
 
+def take[K](counts: dict[K, int], key: K) -> None:
+    """Remove one unit of key, dropping the entry when it reaches zero."""
+    counts[key] -= 1
+    if counts[key] == 0:
+        del counts[key]
+
+
+def put[K](counts: dict[K, int], key: K) -> None:
+    """Add one unit of key."""
+    counts[key] = counts.get(key, 0) + 1
+
+
 class Engine:
     def __init__(self) -> None:
         self.committed: World | None = None
@@ -409,32 +421,18 @@ class Engine:
                     for op in ops:
                         match op:
                             case Load(destination=d):
-                                dock_cargo[(loc, d)] -= 1
-                                if dock_cargo[(loc, d)] == 0:
-                                    del dock_cargo[(loc, d)]
-                                cargo[d] = cargo.get(d, 0) + 1
+                                take(dock_cargo, (loc, d))
+                                put(cargo, d)
                             case Unload(destination=d):
-                                cargo[d] -= 1
-                                if cargo[d] == 0:
-                                    del cargo[d]
-                                if d != loc:
-                                    dock_cargo[(loc, d)] = (
-                                        dock_cargo.get((loc, d), 0) + 1
-                                    )
+                                take(cargo, d)
+                                if d != loc:  # d == loc: delivered, leaves the sim
+                                    put(dock_cargo, (loc, d))
                             case Swap(load=ld, unload=ud):
-                                # load half: dock -> vessel
-                                dock_cargo[(loc, ld)] -= 1
-                                if dock_cargo[(loc, ld)] == 0:
-                                    del dock_cargo[(loc, ld)]
-                                cargo[ld] = cargo.get(ld, 0) + 1
-                                # unload half: vessel -> dock, or delivered
-                                cargo[ud] -= 1
-                                if cargo[ud] == 0:
-                                    del cargo[ud]
+                                take(dock_cargo, (loc, ld))
+                                put(cargo, ld)
+                                take(cargo, ud)
                                 if ud != loc:
-                                    dock_cargo[(loc, ud)] = (
-                                        dock_cargo.get((loc, ud), 0) + 1
-                                    )
+                                    put(dock_cargo, (loc, ud))
                             case _:
                                 assert_never(op)
                     vessel_cargo[vid] = cargo
