@@ -1,13 +1,17 @@
 from typing import Any, assert_never
 
 from .models import (
+    CargoOp,
+    CargoOps,
     Dock,
     Docked,
     Idle,
     Intent,
+    Load,
     SetDest,
     Transit,
     Undock,
+    Unload,
     VesselState,
     World,
 )
@@ -152,6 +156,10 @@ class Engine:
                 return self._dock(params)
             case "undock":
                 return self._undock(params)
+            case "load":
+                return self._load(params)
+            case "unload":
+                return self._unload(params)
             case _:
                 raise CommandError(f"unknown command: {name}")
 
@@ -245,20 +253,107 @@ class Engine:
         if isinstance(current, Idle) and isinstance(self.pending.get(vid), Dock):
             del self.pending[vid]  # undock after dock: cancel
         elif isinstance(current, Docked):
-            self.pending[vid] = Undock()  # idempotent if already undocking
+            self.pending[vid] = Undock()  # replaces any pending cargo ops
         else:
             raise CommandError(f"vessel {vid} is not docked")
 
         return self._planned().to_dict()
 
+    def _load(self, params: dict[str, Any]) -> dict[str, Any]:
+        committed = self.committed
+        assert committed is not None
+        vid, d = params.get("vessel_id"), params.get("destination")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+        if type(d) is not int or not 0 <= d < len(self.travel_times):
+            raise CommandError(f"destination {d} is out of range")
+
+        current = committed.vessels[vid]
+
+        if not isinstance(current, Docked):
+            raise CommandError(f"vessel {vid} is not docked")
+
+        loc = current.location
+        pending = self.pending.get(vid)
+        ops = list(pending.ops) if isinstance(pending, CargoOps) else []
+
+        if Unload(d) in ops:
+            ops.remove(Unload(d))
+        else:
+            at_dock = self._ops_at(current)
+            if committed.dock_cargo.get((loc, d), 0) - at_dock.count(Load(d)) < 1:
+                raise CommandError(f"no cargo for destination {d} at location {loc}")
+            total = len(at_dock) + 1
+            if total > self.dock_throughput[loc]:
+                raise CommandError(
+                    f"transfer of {total} operations exceeds dock throughput of {self.dock_throughput[loc]} at location {loc}"
+                )
+            ops.append(Load(d))
+
+        if ops:
+            self.pending[vid] = CargoOps(tuple(ops))
+        else:
+            del self.pending[vid]
+        return self._planned().to_dict()
+
+    def _unload(self, params: dict[str, Any]) -> dict[str, Any]:
+        committed = self.committed
+        assert committed is not None
+        vid, d = params.get("vessel_id"), params.get("destination")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+        if type(d) is not int or not 0 <= d < len(self.travel_times):
+            raise CommandError(f"destination {d} is out of range")
+
+        current = committed.vessels[vid]
+
+        if not isinstance(current, Docked):
+            raise CommandError(f"vessel {vid} is not docked")
+
+        loc = current.location
+        pending = self.pending.get(vid)
+        ops = list(pending.ops) if isinstance(pending, CargoOps) else []
+
+        if Load(d) in ops:
+            ops.remove(Load(d))
+        else:
+            # only this vessel's own pending unloads can claim its cargo
+            if committed.vessel_cargo[vid].get(d, 0) - ops.count(Unload(d)) < 1:
+                raise CommandError(f"vessel {vid} has no cargo for destination {d}")
+            total = len(self._ops_at(current)) + 1
+            if total > self.dock_throughput[loc]:
+                raise CommandError(
+                    f"transfer of {total} operations exceeds dock throughput"
+                    f" of {self.dock_throughput[loc]} at location {loc}"
+                )
+            ops.append(Unload(d))
+
+        if ops:
+            self.pending[vid] = CargoOps(tuple(ops))
+        else:
+            del self.pending[vid]
+        return self._planned().to_dict()
+
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._planned().to_dict()
+
+    def _ops_at(self, dock: Docked) -> list[CargoOp]:
+        committed = self.committed
+        assert committed is not None
+        return [
+            op
+            for vid, intent in self.pending.items()
+            if isinstance(intent, CargoOps) and committed.vessels[vid] == dock
+            for op in intent.ops
+        ]
 
     def _planned(self) -> World:
         committed = self.committed
         assert committed is not None
 
         vessels = dict(committed.vessels)
+        vessel_cargo = dict(committed.vessel_cargo)
+        dock_cargo = dict(committed.dock_cargo)
         for vid, intent in self.pending.items():
             current = committed.vessels[vid]
             match intent:
@@ -276,12 +371,34 @@ class Engine:
                 case Undock():
                     assert isinstance(current, Docked)
                     vessels[vid] = Idle(current.location)
+                case CargoOps(ops=ops):
+                    assert isinstance(current, Docked)
+                    loc = current.location
+                    cargo = dict(vessel_cargo[vid])
+                    for op in ops:
+                        match op:
+                            case Load(destination=d):
+                                dock_cargo[(loc, d)] -= 1
+                                if dock_cargo[(loc, d)] == 0:
+                                    del dock_cargo[(loc, d)]
+                                cargo[d] = cargo.get(d, 0) + 1
+                            case Unload(destination=d):
+                                cargo[d] -= 1
+                                if cargo[d] == 0:
+                                    del cargo[d]
+                                if d != loc:
+                                    dock_cargo[(loc, d)] = (
+                                        dock_cargo.get((loc, d), 0) + 1
+                                    )
+                            case _:
+                                assert_never(op)
+                    vessel_cargo[vid] = cargo
                 case _:
                     assert_never(intent)
 
         return World(
             tick=committed.tick,
             vessels=vessels,
-            vessel_cargo=committed.vessel_cargo,
-            dock_cargo=committed.dock_cargo,
+            vessel_cargo=vessel_cargo,
+            dock_cargo=dock_cargo,
         )

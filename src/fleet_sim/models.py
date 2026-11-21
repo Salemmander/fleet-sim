@@ -23,6 +23,24 @@ VesselState = Idle | Transit | Docked
 
 
 @dataclass(frozen=True)
+class Load:
+    destination: int
+
+
+@dataclass(frozen=True)
+class Unload:
+    destination: int
+
+
+CargoOp = Load | Unload
+
+
+@dataclass(frozen=True)
+class CargoOps:
+    ops: tuple[CargoOp, ...]
+
+
+@dataclass(frozen=True)
 class Dock:
     pass
 
@@ -37,7 +55,7 @@ class SetDest:
     destination: int
 
 
-Intent = SetDest | Dock | Undock
+Intent = SetDest | Dock | Undock | CargoOps
 
 
 @dataclass(frozen=True)
