@@ -277,11 +277,7 @@ class Engine:
             at_dock = self._ops_at(current)
             if committed.dock_cargo.get((loc, d), 0) - loads_of(at_dock, d) < 1:
                 raise CommandError(f"no cargo for destination {d} at location {loc}")
-            total = len(at_dock) + 1
-            if total > self.dock_throughput[loc]:
-                raise CommandError(
-                    f"transfer of {total} operations exceeds dock throughput of {self.dock_throughput[loc]} at location {loc}"
-                )
+            self._check_throughput(loc, at_dock)
             ops.append(Load(d))
 
         if ops:
@@ -309,12 +305,7 @@ class Engine:
             # only this vessel's own pending unloads can claim its cargo
             if committed.vessel_cargo[vid].get(d, 0) - unloads_of(ops, d) < 1:
                 raise CommandError(f"vessel {vid} has no cargo for destination {d}")
-            total = len(self._ops_at(current)) + 1
-            if total > self.dock_throughput[loc]:
-                raise CommandError(
-                    f"transfer of {total} operations exceeds dock throughput"
-                    f" of {self.dock_throughput[loc]} at location {loc}"
-                )
+            self._check_throughput(loc, self._ops_at(current))
             ops.append(Unload(d))
 
         if ops:
@@ -349,12 +340,7 @@ class Engine:
             raise CommandError(f"no cargo for destination {ld} at location {loc}")
         if committed.vessel_cargo[vid].get(ud, 0) - unloads_of(ops, ud) < 1:
             raise CommandError(f"vessel {vid} has no cargo for destination {ud}")
-        total = len(at_dock) + 1
-        if total > self.dock_throughput[loc]:
-            raise CommandError(
-                f"transfer of {total} operations exceeds dock throughput"
-                f" of {self.dock_throughput[loc]} at location {loc}"
-            )
+        self._check_throughput(loc, at_dock)
 
         ops.append(Swap(ld, ud))
         self.pending[vid] = CargoOps(tuple(ops))
@@ -381,6 +367,16 @@ class Engine:
             if isinstance(intent, CargoOps) and committed.vessels[vid] == dock
             for op in intent.ops
         ]
+
+    def _check_throughput(self, loc: int, at_dock: list[CargoOp]) -> None:
+        """Raise if one more op at loc would exceed its dock throughput."""
+        total = len(at_dock) + 1
+        limit = self.dock_throughput[loc]
+        if total > limit:
+            raise CommandError(
+                f"transfer of {total} operations exceeds dock throughput"
+                f" of {limit} at location {loc}"
+            )
 
     def _planned(self) -> World:
         committed = self.committed
