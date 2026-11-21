@@ -17,9 +17,51 @@ class CommandError(Exception):
     pass
 
 
+def parse_manifest(raw: Any, n: int) -> dict[tuple[int, int], int]:
+    """Validate an optional cargo_manifest and return (location, destination) -> qty.
+
+    Checks:
+      - missing (None) means no cargo; otherwise it must be a list
+      - each entry: {"location": int in 0..N-1, "destination": int in 0..N-1,
+        "quantity": positive int}, location != destination (bools rejected)
+
+    Entries with the same (location, destination) are summed.
+    Raises CommandError on the first bad entry, rejecting the whole manifest.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, list):
+        raise CommandError("cargo_manifest must be a list")
+    cargo: dict[tuple[int, int], int] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise CommandError(f"invalid cargo entry: {entry}")
+        loc, dest, qty = (
+            entry.get("location"),
+            entry.get("destination"),
+            entry.get("quantity"),
+        )
+        if (
+            type(loc) is not int
+            or type(dest) is not int
+            or type(qty) is not int
+            or not 0 <= loc < n
+            or not 0 <= dest < n
+            or loc == dest
+            or qty <= 0
+        ):
+            raise CommandError(f"invalid cargo entry: {entry}")
+
+        cargo[(loc, dest)] = cargo.get((loc, dest), 0) + qty
+
+    return cargo
+
+
 def parse_init(
     params: dict[str, Any],
-) -> tuple[list[list[int]], dict[str, VesselState]]:
+) -> tuple[
+    list[list[int]], list[int], dict[str, VesselState], dict[tuple[int, int], int]
+]:
     """Validate init parameters and return (travel_times, vessel states).
 
     Checks:
@@ -34,6 +76,15 @@ def parse_init(
     if not isinstance(travel_times, list) or not travel_times:
         raise CommandError("travel_times must be a non-empty NxN matrix")
     n = len(travel_times)
+
+    dock_throughput = params.get("dock_throughput")
+    if not isinstance(dock_throughput, list) or len(dock_throughput) != n:
+        raise CommandError(f"dock_throughput must be a list of {n} positive integers")
+    for t in dock_throughput:
+        if type(t) is not int or t <= 0:
+            raise CommandError(
+                f"dock_throughput must be a list of {n} positive integers"
+            )
 
     for i, row in enumerate(travel_times):
         if not isinstance(row, list) or len(row) != n:
@@ -57,7 +108,9 @@ def parse_init(
             raise CommandError(f"duplicate vessel id {vid}")
         states[vid] = Idle(loc)
 
-    return travel_times, states
+    dock_cargo = parse_manifest(params.get("cargo_manifest"), n)
+
+    return travel_times, dock_throughput, states, dock_cargo
 
 
 class Engine:
@@ -65,6 +118,7 @@ class Engine:
         self.committed: World | None = None
         self.pending: dict[str, Intent] = {}
         self.travel_times: list[list[int]] = []
+        self.dock_throughput: list[int] = []
 
     def step(self, cmd: dict[str, Any]) -> dict[str, Any]:
         try:

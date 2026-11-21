@@ -44,6 +44,8 @@ Intent = SetDest | Dock | Undock
 class World:
     tick: int
     vessels: dict[str, VesselState]
+    vessel_cargo: dict[str, dict[int, int]]  # vessel_id -> {destination: qty}
+    dock_cargo: dict[tuple[int, int], int]  # (location, destination) -> qty
 
     def to_dict(self) -> dict[str, Any]:
         vessels: dict[str, dict[str, Any]] = {}
@@ -62,4 +64,15 @@ class World:
                     vessels[vid] = {"state": "docked", "location": loc}
                 case _:
                     assert_never(state)
-        return {"tick": self.tick, "vessels": vessels}
+            vessels[vid]["cargo"] = [
+                {"destination": d, "quantity": q}
+                for d, q in self.vessel_cargo[vid].items()
+            ]
+        return {
+            "tick": self.tick,
+            "vessels": vessels,
+            "cargo": [
+                {"location": loc, "destination": d, "quantity": q}
+                for (loc, d), q in self.dock_cargo.items()
+            ],
+        }
