@@ -220,17 +220,11 @@ class Engine:
         return self.committed.to_dict()
 
     def _set_destination(self, params: dict[str, Any]) -> dict[str, Any]:
-        committed = self.committed
-        assert committed is not None
-
-        vid = params.get("vessel_id")
+        _, vid, current = self._vessel(params)
         dest = params.get("destination")
-        if not isinstance(vid, str) or vid not in committed.vessels:
-            raise CommandError(f"unknown vessel {vid}")
         if type(dest) is not int or not 0 <= dest < len(self.travel_times):
             raise CommandError(f"destination {dest} is out of range")
 
-        current = committed.vessels[vid]
         if not isinstance(current, Idle):
             raise CommandError(f"vessel {vid} is not idle")
 
@@ -241,13 +235,7 @@ class Engine:
         return self._planned().to_dict()
 
     def _dock(self, params: dict[str, Any]) -> dict[str, Any]:
-        committed = self.committed
-        assert committed is not None
-        vid = params.get("vessel_id")
-        if not isinstance(vid, str) or vid not in committed.vessels:
-            raise CommandError(f"unknown vessel {vid}")
-
-        current = committed.vessels[vid]
+        _, vid, current = self._vessel(params)
 
         if isinstance(current, Docked) and isinstance(self.pending.get(vid), Undock):
             del self.pending[vid]  # dock after undock: cancel
@@ -259,13 +247,7 @@ class Engine:
         return self._planned().to_dict()
 
     def _undock(self, params: dict[str, Any]) -> dict[str, Any]:
-        committed = self.committed
-        assert committed is not None
-        vid = params.get("vessel_id")
-        if not isinstance(vid, str) or vid not in committed.vessels:
-            raise CommandError(f"unknown vessel {vid}")
-
-        current = committed.vessels[vid]
+        _, vid, current = self._vessel(params)
 
         if isinstance(current, Idle) and isinstance(self.pending.get(vid), Dock):
             del self.pending[vid]  # undock after dock: cancel
@@ -277,15 +259,10 @@ class Engine:
         return self._planned().to_dict()
 
     def _load(self, params: dict[str, Any]) -> dict[str, Any]:
-        committed = self.committed
-        assert committed is not None
-        vid, d = params.get("vessel_id"), params.get("destination")
-        if not isinstance(vid, str) or vid not in committed.vessels:
-            raise CommandError(f"unknown vessel {vid}")
+        committed, vid, current = self._vessel(params)
+        d = params.get("destination")
         if type(d) is not int or not 0 <= d < len(self.travel_times):
             raise CommandError(f"destination {d} is out of range")
-
-        current = committed.vessels[vid]
 
         if not isinstance(current, Docked):
             raise CommandError(f"vessel {vid} is not docked")
@@ -314,15 +291,10 @@ class Engine:
         return self._planned().to_dict()
 
     def _unload(self, params: dict[str, Any]) -> dict[str, Any]:
-        committed = self.committed
-        assert committed is not None
-        vid, d = params.get("vessel_id"), params.get("destination")
-        if not isinstance(vid, str) or vid not in committed.vessels:
-            raise CommandError(f"unknown vessel {vid}")
+        committed, vid, current = self._vessel(params)
+        d = params.get("destination")
         if type(d) is not int or not 0 <= d < len(self.travel_times):
             raise CommandError(f"destination {d} is out of range")
-
-        current = committed.vessels[vid]
 
         if not isinstance(current, Docked):
             raise CommandError(f"vessel {vid} is not docked")
@@ -352,19 +324,13 @@ class Engine:
         return self._planned().to_dict()
 
     def _swap(self, params: dict[str, Any]) -> dict[str, Any]:
-        committed = self.committed
-        assert committed is not None
-        vid = params.get("vessel_id")
+        committed, vid, current = self._vessel(params)
         ld, ud = params.get("load_destination"), params.get("unload_destination")
-        if not isinstance(vid, str) or vid not in committed.vessels:
-            raise CommandError(f"unknown vessel {vid}")
         n = len(self.travel_times)
         if type(ld) is not int or not 0 <= ld < n:
             raise CommandError(f"load_destination {ld} is out of range")
         if type(ud) is not int or not 0 <= ud < n:
             raise CommandError(f"unload_destination {ud} is out of range")
-
-        current = committed.vessels[vid]
 
         if not isinstance(current, Docked):
             raise CommandError(f"vessel {vid} is not docked")
@@ -396,6 +362,15 @@ class Engine:
 
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._planned().to_dict()
+
+    def _vessel(self, params: dict[str, Any]) -> tuple[World, str, VesselState]:
+        """Look up params["vessel_id"]; return (committed world, id, committed state)."""
+        committed = self.committed
+        assert committed is not None
+        vid = params.get("vessel_id")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+        return committed, vid, committed.vessels[vid]
 
     def _ops_at(self, dock: Docked) -> list[CargoOp]:
         committed = self.committed
