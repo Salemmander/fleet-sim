@@ -67,12 +67,16 @@ def parse_init(
 ) -> tuple[
     list[list[int]], list[int], dict[str, VesselState], dict[tuple[int, int], int]
 ]:
-    """Validate init parameters and return (travel_times, vessel states).
+    """Validate init parameters.
+
+    Returns (travel_times, dock_throughput, vessel states, dock cargo).
 
     Checks:
       - travel_times: non-empty N x N list of ints, 0 on the diagonal,
         positive everywhere else (bools rejected)
+      - dock_throughput: list of N positive ints
       - vessels: list of {"id": str, "location": int in 0..N-1}, ids unique
+      - cargo_manifest: optional, validated by parse_manifest
 
     Every vessel starts Idle at its location, in input order.
     Raises CommandError on the first violation; never touches engine state.
@@ -82,6 +86,14 @@ def parse_init(
         raise CommandError("travel_times must be a non-empty NxN matrix")
     n = len(travel_times)
 
+    for i, row in enumerate(travel_times):
+        if not isinstance(row, list) or len(row) != n:
+            raise CommandError("travel_times must be a non-empty NxN matrix")
+        for j, t in enumerate(row):
+            # type() not isinstance(): bool is a subclass of int
+            if type(t) is not int or (t != 0 if i == j else t <= 0):
+                raise CommandError(f"invalid travel time at [{i}][{j}]")
+
     dock_throughput = params.get("dock_throughput")
     if not isinstance(dock_throughput, list) or len(dock_throughput) != n:
         raise CommandError(f"dock_throughput must be a list of {n} positive integers")
@@ -90,14 +102,6 @@ def parse_init(
             raise CommandError(
                 f"dock_throughput must be a list of {n} positive integers"
             )
-
-    for i, row in enumerate(travel_times):
-        if not isinstance(row, list) or len(row) != n:
-            raise CommandError("travel_times must be a non-empty NxN matrix")
-        for j, t in enumerate(row):
-            # type() not isinstance(): bool is a subclass of int
-            if type(t) is not int or (t != 0 if i == j else t <= 0):
-                raise CommandError(f"invalid travel time at [{i}][{j}]")
 
     vessels = params.get("vessels")
     if not isinstance(vessels, list):
