@@ -22,6 +22,7 @@ from .params import (
     DestinationParams,
     InitParams,
     ManifestEntry,
+    NoParams,
     SwapParams,
     TickParams,
     VesselParams,
@@ -342,6 +343,7 @@ class Engine:
         return self._planned().to_dict()
 
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
+        NoParams.model_validate(params)
         return self._planned().to_dict()
 
     def _vessel(self, vid: str) -> tuple[World, str, VesselState]:

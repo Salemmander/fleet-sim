@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 
 class Params(BaseModel):
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
 
 class VesselSpec(Params):
@@ -21,6 +21,10 @@ class InitParams(Params):
     dock_throughput: list[PositiveInt]
     vessels: list[VesselSpec]
     cargo_manifest: list[ManifestEntry] = []
+
+
+class NoParams(Params):
+    """get_state takes no parameters."""
 
 
 class TickParams(Params):
