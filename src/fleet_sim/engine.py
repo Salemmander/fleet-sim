@@ -1,6 +1,16 @@
 from typing import Any, assert_never
 
-from .models import Idle, Intent, SetDest, Transit, VesselState, World
+from .models import (
+    Dock,
+    Docked,
+    Idle,
+    Intent,
+    SetDest,
+    Transit,
+    Undock,
+    VesselState,
+    World,
+)
 
 
 class CommandError(Exception):
@@ -84,6 +94,10 @@ class Engine:
                 return self._set_destination(params)
             case "get_state":
                 return self._get_state(params)
+            case "dock":
+                return self._dock(params)
+            case "undock":
+                return self._undock(params)
             case _:
                 raise CommandError(f"unknown command: {name}")
 
@@ -102,7 +116,7 @@ class Engine:
             match state:
                 case Transit(to=to, arrival_tick=arrival) if arrival == new_tick:
                     vessels[vid] = Idle(to)
-                case Idle() | Transit():
+                case Idle() | Transit() | Docked():
                     vessels[vid] = state
                 case _:
                     assert_never(state)
@@ -132,6 +146,42 @@ class Engine:
             self.pending[vid] = SetDest(dest)
         return self._planned().to_dict()
 
+    def _dock(self, params: dict[str, Any]) -> dict[str, Any]:
+        committed = self.committed
+        assert committed is not None
+        vid = params.get("vessel_id")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+
+        current = committed.vessels[vid]
+
+        if isinstance(current, Docked) and isinstance(self.pending.get(vid), Undock):
+            del self.pending[vid]  # dock after undock: cancel
+        elif isinstance(current, Idle):
+            self.pending[vid] = Dock()  # overwrites a pending action, including SetDest
+        else:
+            raise CommandError(f"vessel {vid} is not idle")
+
+        return self._planned().to_dict()
+
+    def _undock(self, params: dict[str, Any]) -> dict[str, Any]:
+        committed = self.committed
+        assert committed is not None
+        vid = params.get("vessel_id")
+        if not isinstance(vid, str) or vid not in committed.vessels:
+            raise CommandError(f"unknown vessel {vid}")
+
+        current = committed.vessels[vid]
+
+        if isinstance(current, Idle) and isinstance(self.pending.get(vid), Dock):
+            del self.pending[vid]  # undock after dock: cancel
+        elif isinstance(current, Docked):
+            self.pending[vid] = Undock()  # idempotent if already undocking
+        else:
+            raise CommandError(f"vessel {vid} is not docked")
+
+        return self._planned().to_dict()
+
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._planned().to_dict()
 
@@ -151,6 +201,12 @@ class Engine:
                         arrival_tick=committed.tick
                         + self.travel_times[current.location][dest],
                     )
+                case Dock():
+                    assert isinstance(current, Idle)
+                    vessels[vid] = Docked(current.location)
+                case Undock():
+                    assert isinstance(current, Docked)
+                    vessels[vid] = Idle(current.location)
                 case _:
                     assert_never(intent)
 

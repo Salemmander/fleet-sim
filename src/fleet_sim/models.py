@@ -14,7 +14,22 @@ class Transit:
     arrival_tick: int
 
 
-VesselState = Idle | Transit
+@dataclass(frozen=True)
+class Docked:
+    location: int
+
+
+VesselState = Idle | Transit | Docked
+
+
+@dataclass(frozen=True)
+class Dock:
+    pass
+
+
+@dataclass(frozen=True)
+class Undock:
+    pass
 
 
 @dataclass(frozen=True)
@@ -22,7 +37,7 @@ class SetDest:
     destination: int
 
 
-Intent = SetDest
+Intent = SetDest | Dock | Undock
 
 
 @dataclass(frozen=True)
@@ -43,6 +58,8 @@ class World:
                         "to": to,
                         "arrives_at_tick": arrival,
                     }
+                case Docked(location=loc):
+                    vessels[vid] = {"state": "docked", "location": loc}
                 case _:
                     assert_never(state)
         return {"tick": self.tick, "vessels": vessels}
