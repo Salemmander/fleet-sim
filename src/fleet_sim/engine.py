@@ -1,4 +1,4 @@
-from typing import Any, assert_never, cast
+from typing import Any, assert_never
 
 from pydantic import ValidationError
 
@@ -19,6 +19,7 @@ from .models import (
     World,
 )
 from .params import (
+    Command,
     DestinationParams,
     InitParams,
     ManifestEntry,
@@ -34,9 +35,7 @@ class CommandError(Exception):
     pass
 
 
-def parse_manifest(
-    entries: list[ManifestEntry], n: int
-) -> dict[tuple[int, int], int]:
+def parse_manifest(entries: list[ManifestEntry], n: int) -> dict[tuple[int, int], int]:
     """Check manifest entries against the map; return (location, destination) -> qty.
 
     Types and positive quantities are already checked by ManifestEntry. Here:
@@ -46,7 +45,10 @@ def parse_manifest(
     """
     cargo: dict[tuple[int, int], int] = {}
     for e in entries:
-        if not (0 <= e.location < n and 0 <= e.destination < n) or e.location == e.destination:
+        if (
+            not (0 <= e.location < n and 0 <= e.destination < n)
+            or e.location == e.destination
+        ):
             raise CommandError(f"invalid cargo entry: {e.model_dump()}")
         key = (e.location, e.destination)
         cargo[key] = cargo.get(key, 0) + e.quantity
@@ -136,15 +138,12 @@ class Engine:
         except ValidationError as e:
             err = e.errors()[0]
             where = ".".join(str(part) for part in err["loc"])
-            message = f"invalid parameter {where}: {err['msg']}"
+            message = f"invalid field {where}: {err['msg']}"
             return {"status": "error", "payload": {"message": message}}
 
     def _dispatch(self, cmd: dict[str, Any]) -> dict[str, Any]:
-        name = cmd.get("command")
-        raw = cmd.get("parameters", {})
-        if not isinstance(raw, dict):
-            raise CommandError("parameters must be an object")
-        params = cast(dict[str, Any], raw)
+        envelope = Command.model_validate(cmd)
+        name, params = envelope.command, envelope.parameters
 
         if name == "init":
             if self.committed is not None:
@@ -360,7 +359,9 @@ class Engine:
         tick = TickQueryParams.model_validate(params).tick
         current = len(self.history) - 1
         if tick > current:
-            raise CommandError(f"tick {tick} is in the future (current tick: {current})")
+            raise CommandError(
+                f"tick {tick} is in the future (current tick: {current})"
+            )
         if tick < 0:
             raise CommandError(f"tick {tick} is out of range (0 to {current})")
         return self.history[tick].to_dict()

@@ -1,8 +1,17 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 
 class Params(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+
+
+class Command(Params):
+    """The envelope every command arrives in."""
+
+    command: str
+    parameters: dict[str, Any] = {}
 
 
 class VesselSpec(Params):
