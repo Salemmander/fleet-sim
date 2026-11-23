@@ -25,6 +25,7 @@ from .params import (
     NoParams,
     SwapParams,
     TickParams,
+    TickQueryParams,
     VesselParams,
 )
 
@@ -116,10 +117,15 @@ def put[K](counts: dict[K, int], key: K) -> None:
 
 class Engine:
     def __init__(self) -> None:
-        self.committed: World | None = None
+        self.history: list[World] = []  # committed state at each tick; index = tick
         self.pending: dict[str, Intent] = {}
         self.travel_times: list[list[int]] = []
         self.dock_throughput: list[int] = []
+
+    @property
+    def committed(self) -> World | None:
+        """The current committed state: the latest snapshot, None before init."""
+        return self.history[-1] if self.history else None
 
     def step(self, cmd: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -155,6 +161,8 @@ class Engine:
                 return self._set_destination(params)
             case "get_state":
                 return self._get_state(params)
+            case "get_state_at":
+                return self._get_state_at(params)
             case "dock":
                 return self._dock(params)
             case "undock":
@@ -173,13 +181,14 @@ class Engine:
         states, dock_cargo = parse_init(p)
         self.travel_times = p.travel_times
         self.dock_throughput = p.dock_throughput
-        self.committed = World(
+        world = World(
             tick=0,
             vessels=states,
             vessel_cargo={vid: {} for vid in states},
             dock_cargo=dock_cargo,
         )
-        return self.committed.to_dict()
+        self.history.append(world)
+        return world.to_dict()
 
     def _tick(self, params: dict[str, Any]) -> dict[str, Any]:
         p = TickParams.model_validate(params)
@@ -200,14 +209,15 @@ class Engine:
         dock_cargo = dict(planned.dock_cargo)
         for key, qty in manifest.items():
             dock_cargo[key] = dock_cargo.get(key, 0) + qty
-        self.committed = World(
+        world = World(
             tick=new_tick,
             vessels=vessels,
             vessel_cargo=planned.vessel_cargo,
             dock_cargo=dock_cargo,
         )
+        self.history.append(world)
         self.pending = {}
-        return self.committed.to_dict()
+        return world.to_dict()
 
     def _set_destination(self, params: dict[str, Any]) -> dict[str, Any]:
         p = DestinationParams.model_validate(params)
@@ -345,6 +355,15 @@ class Engine:
     def _get_state(self, params: dict[str, Any]) -> dict[str, Any]:
         NoParams.model_validate(params)
         return self._planned().to_dict()
+
+    def _get_state_at(self, params: dict[str, Any]) -> dict[str, Any]:
+        tick = TickQueryParams.model_validate(params).tick
+        current = len(self.history) - 1
+        if tick > current:
+            raise CommandError(f"tick {tick} is in the future (current tick: {current})")
+        if tick < 0:
+            raise CommandError(f"tick {tick} is out of range (0 to {current})")
+        return self.history[tick].to_dict()
 
     def _vessel(self, vid: str) -> tuple[World, str, VesselState]:
         """Look up a vessel; return (committed world, id, committed state)."""

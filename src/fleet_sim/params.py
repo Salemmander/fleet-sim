@@ -48,3 +48,9 @@ class SwapParams(Params):
     vessel_id: str
     load_destination: int
     unload_destination: int
+
+
+class TickQueryParams(Params):
+    """get_state_at"""
+
+    tick: int
