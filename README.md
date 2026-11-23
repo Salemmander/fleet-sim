@@ -62,4 +62,4 @@ tests/
 scenarios/     sample init parameters for interactive mode
 ```
 
-Design decisions and their reasoning are in the design doc.
+Design decisions and their reasoning are in [DESIGN.md](DESIGN.md).
